@@ -266,4 +266,32 @@ mod tests {
         assert_eq!(read_bytes, written);
         Ok(())
     }
+
+    #[test]
+    fn test_store_multiple_records() -> StorageResult<()> {
+        let temp_file = NamedTempFile::new().unwrap();
+        let mut store = Store::new(temp_file.path())?;
+
+        let records = [
+            b"First record".as_slice(), //we can get type coercion by creating the first, then the rest are coerced to &[u8]
+            b"Second record",
+            b"Third record with more data",
+        ];
+
+        let mut positions = Vec::new();
+
+        //Append all the records
+        for record in records {
+            let (pos, _) = store.append(record)?;
+            positions.push(pos);
+        }
+
+        //Read all the positions back
+        for (i, &pos) in positions.iter().enumerate() {
+            let (data, _) = store.read(pos)?;
+            assert_eq!(data, records[i]);
+        }
+
+        Ok(())
+    }
 }
