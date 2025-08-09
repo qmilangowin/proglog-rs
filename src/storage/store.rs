@@ -237,3 +237,33 @@ impl Drop for Store {
         let _ = self.file.set_len(self.size);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_store_append_and_read() -> StorageResult<()> {
+        let temp_file = NamedTempFile::new().unwrap();
+        let mut store = Store::new(temp_file.path())?;
+
+        // Test appending and reading a single record
+        let data = b"Hello, World";
+        let (pos, written) = store.append(data)?;
+
+        // our record should look like this after the first append
+        // | Offset | Bytes                                    | Meaning         |
+        // |--------|------------------------------------------|-----------------|
+        // | 0–7    | 0C 00 00 00 00 00 00 00                  | Length = 12     |
+        // | 8–19   | 48 65 6C 6C 6F 2C 20 57 6F 72 6C 64      | "Hello, World"  |
+
+        assert_eq!(pos, 0); // First record starts at position 0
+        assert_eq!(written, 8 + data.len() as u64); //8 bytes length info + data
+
+        let (read_data, read_bytes) = store.read(pos)?;
+        assert_eq!(read_data, data);
+        assert_eq!(read_bytes, written);
+        Ok(())
+    }
+}
