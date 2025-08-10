@@ -74,11 +74,43 @@ pub enum StorageError {
 /// Index-related errors  
 #[derive(Error, Debug)]
 pub enum IndexError {
+    #[error("Failed to open index file: {path}")]
+    OpenFailed {
+        path: String,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("Failed to write to index at position {position}")]
+    WriteFailed {
+        position: u64,
+        #[source]
+        source: io::Error,
+    },
+
     #[error("Offset {offset} not found in index")]
     OffsetNotFound { offset: u64 },
 
     #[error("Index entry at position {position} is corrupted")]
     CorruptedEntry { position: u64 },
+
+    #[error("Index file is corrupted: {reason}")]
+    CorruptedFile { reason: String },
+
+    #[error("Failed to grow index from {current_size} to {target_size}")]
+    GrowFailed {
+        current_size: u64,
+        target_size: u64,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("Memory mapping failed for size {size}")]
+    MmapFailed {
+        size: u64,
+        #[source]
+        source: io::Error,
+    },
 
     #[error("Index is full, cannot add more entries")]
     IndexFull,
@@ -125,11 +157,6 @@ pub enum ConsensusError {
     LogDivergence { index: u64 },
 }
 
-/// Type alias for Results in this crate
-pub type ProglogResult<T> = Result<T, ProglogError>;
-pub type StorageResult<T> = Result<T, StorageError>;
-pub type IndexResult<T> = Result<T, IndexError>;
-
 impl ProglogError {
     /// Check if this error is recoverable (e.g., can retry)
     pub fn is_recoverable(&self) -> bool {
@@ -168,28 +195,4 @@ impl StorageError {
             _ => false,
         }
     }
-}
-
-/// Helper macros for creating common errors
-#[macro_export]
-macro_rules! storage_error {
-    (read_beyond_end, $pos:expr, $size:expr) => {
-        $crate::errors::StorageError::ReadBeyondEnd {
-            position: $pos,
-            size: $size,
-        }
-    };
-    (corrupted_record, $pos:expr, $reason:expr) => {
-        $crate::errors::StorageError::CorruptedRecord {
-            position: $pos,
-            reason: $reason.to_string(),
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! index_error {
-    (offset_not_found, $offset:expr) => {
-        $crate::errors::IndexError::OffsetNotFound { offset: $offset }
-    };
 }
