@@ -2,7 +2,6 @@ use crate::errors::{StorageError, StorageResult};
 use crate::storage::StorageContext;
 use memmap2::{MmapMut, MmapOptions};
 use std::fs::{File, OpenOptions};
-use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 use tracing::{debug, info, instrument, warn};
 
@@ -30,8 +29,9 @@ impl Store {
 
         let file = OpenOptions::new()
             .read(true)
+            .write(true)
             .create(true)
-            .append(true)
+            .truncate(false)
             .open(path.as_ref())
             .with_open_context(&path_str)?;
 
@@ -40,18 +40,21 @@ impl Store {
         debug!(existing_size = file_len, "File opened");
 
         // ensure file has at least some size for memory mapping.
-        let initial_size = if file_len == 0 { 1024 * 1024 } else { file_len };
-
-        let mut file_for_resize = file.try_clone().with_open_context(&path_str)?;
-        file_for_resize
-            .seek(SeekFrom::Start(initial_size - 1))
-            .with_grow_context(file_len, initial_size)?;
-        file_for_resize
-            .write_all(&[0])
-            .with_grow_context(file_len, initial_size)?;
-        file_for_resize
-            .sync_all()
-            .with_grow_context(file_len, initial_size)?;
+        let initial_size = if file_len == 0 {
+            // New file - start with 1MB
+            let new_size = 1024 * 1024;
+            let file_for_resize = file.try_clone().with_open_context(&path_str)?;
+            file_for_resize
+                .set_len(new_size)
+                .with_grow_context(file_len, new_size)?;
+            file_for_resize
+                .sync_all()
+                .with_grow_context(file_len, new_size)?;
+            new_size
+        } else {
+            // Existing file - use current size, it's already been truncated to the right size
+            file_len
+        };
 
         let mmap = unsafe {
             MmapOptions::new()
@@ -203,15 +206,12 @@ impl Store {
         );
 
         // Extend the file to what we need
-        let mut file_for_resize = self
+        let file_for_resize = self
             .file
             .try_clone()
             .with_grow_context(current_capacity, new_capacity)?;
         file_for_resize
-            .seek(SeekFrom::Start(new_capacity - 1))
-            .with_grow_context(current_capacity, new_capacity)?;
-        file_for_resize
-            .write_all(&[0])
+            .set_len(new_capacity)
             .with_grow_context(current_capacity, new_capacity)?;
         file_for_resize
             .sync_all()
@@ -227,6 +227,40 @@ impl Store {
         info!("Store capacity grown successfully");
         Ok(())
     }
+
+    // /// Scans the file for torn records and repairs by truncating incomplete writes.
+    // /// Returns the acutal size of valid data in the file
+    // #[instrument(skip(file))]
+    // fn scan_and_repair(file: &File, file_len: u64, path: &str) -> StorageResult<u64> {
+    //     if file_len == 0 {
+    //         return Ok(0);
+    //     }
+
+    //     info!(file_len, "Starting recovery scan for torn records");
+
+    //     // Memory maps the file for scanning
+    //     let mmap = unsafe {
+    //         MmapOptions::new()
+    //             .len(file_len as usize)
+    //             .map(file)
+    //             .with_mmap_context(file_len)?
+    //     };
+
+    //     let mut pos = 0u64;
+    //     let mut last_valid_pos = 0u64;
+
+    //     while pos < file_len {
+    //         // check if we have enough bytes for a length prefix
+    //         if pos + LEN_WIDTH > file_len {
+    //             warn!(
+    //                 postion = pos,
+    //                 file_len = file_len,
+    //                 "Incomplete length prefix at end of file - truncating"
+    //             )
+    //         };
+    //         break;
+    //     }
+    // }
 }
 
 impl Drop for Store {
@@ -241,10 +275,26 @@ impl Drop for Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Once;
     use tempfile::NamedTempFile;
+    use tracing_subscriber::{EnvFilter, fmt};
+
+    static INIT_TRACING: Once = Once::new();
+
+    fn init_tracing() {
+        INIT_TRACING.call_once(|| {
+            let _ = fmt()
+                .with_env_filter(
+                    EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")),
+                )
+                .with_test_writer()
+                .try_init();
+        });
+    }
 
     #[test]
     fn test_store_append_and_read() -> StorageResult<()> {
+        init_tracing();
         let temp_file = NamedTempFile::new().unwrap();
         let mut store = Store::new(temp_file.path())?;
 
@@ -269,6 +319,7 @@ mod tests {
 
     #[test]
     fn test_store_multiple_records() -> StorageResult<()> {
+        init_tracing();
         let temp_file = NamedTempFile::new().unwrap();
         let mut store = Store::new(temp_file.path())?;
 
@@ -293,5 +344,59 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn test_store_persistance() -> StorageResult<()> {
+        init_tracing();
+        let temp_file = NamedTempFile::new().unwrap();
+        let path = temp_file.path().to_owned();
+
+        let data = b"Persistent data";
+        let pos;
+
+        //Write data and close the store and call our drop implemenation.
+        {
+            let mut store = Store::new(&path)?;
+            let (p, _) = store.append(data)?;
+            pos = p;
+        }
+
+        //Reopen and check persistence
+        {
+            let store = Store::new(&path)?;
+            let (read_data, _) = store.read(pos)?;
+            assert_eq!(read_data, data);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_beyond_end() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let store = Store::new(temp_file.path()).unwrap();
+
+        //try to read beyond the end
+
+        let result = store.read(100);
+        assert!(matches!(
+            result,
+            Err(StorageError::ReadBeyondEnd {
+                position: 100,
+                size: 0
+            })
+        ));
+    }
+
+    #[test]
+    fn test_error_recovery_info() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let store = Store::new(temp_file.path()).unwrap();
+
+        let result = store.read(100);
+        if let Err(err) = result {
+            assert!(!err.is_recoverable());
+        }
     }
 }
