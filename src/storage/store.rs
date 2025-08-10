@@ -39,6 +39,19 @@ impl Store {
 
         debug!(existing_size = file_len, "File opened");
 
+        // check if file is corrupted
+        let actual_data_size = if file_len > 0 {
+            Self::scan_and_repair(&file, file_len, &path_str)?
+        } else {
+            0
+        };
+
+        debug!(
+            original_size = file_len,
+            repaired_size = actual_data_size,
+            "Recovery scan completed"
+        );
+
         // ensure file has at least some size for memory mapping.
         let initial_size = if file_len == 0 {
             // New file - start with 1MB
@@ -53,7 +66,7 @@ impl Store {
             new_size
         } else {
             // Existing file - use current size, it's already been truncated to the right size
-            file_len
+            std::cmp::max(actual_data_size, 1024 * 1024)
         };
 
         let mmap = unsafe {
@@ -72,7 +85,7 @@ impl Store {
         Ok(Store {
             file,
             mmap,
-            size: file_len,
+            size: actual_data_size,
         })
     }
 
@@ -228,39 +241,102 @@ impl Store {
         Ok(())
     }
 
-    // /// Scans the file for torn records and repairs by truncating incomplete writes.
-    // /// Returns the acutal size of valid data in the file
-    // #[instrument(skip(file))]
-    // fn scan_and_repair(file: &File, file_len: u64, path: &str) -> StorageResult<u64> {
-    //     if file_len == 0 {
-    //         return Ok(0);
-    //     }
+    #[instrument(skip(file))]
+    fn scan_and_repair(file: &File, file_len: u64, path: &str) -> StorageResult<u64> {
+        if file_len == 0 {
+            return Ok(0);
+        }
 
-    //     info!(file_len, "Starting recovery scan for torn records");
+        info!(file_len, "Starting recovery scan for torn records");
 
-    //     // Memory maps the file for scanning
-    //     let mmap = unsafe {
-    //         MmapOptions::new()
-    //             .len(file_len as usize)
-    //             .map(file)
-    //             .with_mmap_context(file_len)?
-    //     };
+        // Memory map the file for scanning
+        let mmap = unsafe {
+            MmapOptions::new()
+                .len(file_len as usize)
+                .map(file)
+                .with_mmap_context(file_len)?
+        };
 
-    //     let mut pos = 0u64;
-    //     let mut last_valid_pos = 0u64;
+        let mut pos = 0u64;
+        let mut last_valid_pos = 0u64;
 
-    //     while pos < file_len {
-    //         // check if we have enough bytes for a length prefix
-    //         if pos + LEN_WIDTH > file_len {
-    //             warn!(
-    //                 postion = pos,
-    //                 file_len = file_len,
-    //                 "Incomplete length prefix at end of file - truncating"
-    //             )
-    //         };
-    //         break;
-    //     }
-    // }
+        while pos < file_len {
+            // Check if we have enough bytes for a length prefix
+            // c
+            if pos + LEN_WIDTH > file_len {
+                warn!(
+                    position = pos,
+                    file_len = file_len,
+                    "Incomplete length prefix at end of file - truncating"
+                );
+                break;
+            }
+
+            // Read the length prefix
+            let len_bytes = &mmap[pos as usize..(pos + LEN_WIDTH) as usize];
+            let record_len = u64::from_le_bytes(len_bytes.try_into().map_err(|_| {
+                StorageError::CorruptedRecord {
+                    position: pos,
+                    reason: "Invalid length bytes during recovery".to_string(),
+                }
+            })?);
+
+            debug!(position = pos, record_len, "Found record during scan");
+
+            // Check if record length is reasonable (prevent runaway reads)
+            if record_len > 100 * 1024 * 1024 {
+                // 100MB max record size
+                warn!(
+                    position = pos,
+                    record_len = record_len,
+                    "Suspiciously large record length - treating as corruption"
+                );
+                break;
+            }
+
+            // Check if we have enough bytes for the full record
+            let record_end = pos + LEN_WIDTH + record_len;
+            if record_end > file_len {
+                warn!(
+                    position = pos,
+                    record_len = record_len,
+                    record_end = record_end,
+                    file_len = file_len,
+                    "Incomplete record data - truncating"
+                );
+                break;
+            }
+
+            // Record is complete - move to next
+            last_valid_pos = record_end;
+            pos = record_end;
+        }
+
+        // If we found any torn records, truncate the file
+        if last_valid_pos < file_len {
+            warn!(
+                original_size = file_len,
+                truncated_size = last_valid_pos,
+                "Truncating file to remove torn records"
+            );
+
+            file.set_len(last_valid_pos).with_open_context(path)?;
+            file.sync_all().with_open_context(path)?;
+
+            info!(
+                recovered_size = last_valid_pos,
+                removed_bytes = file_len - last_valid_pos,
+                "Recovery scan completed - file repaired"
+            );
+        } else {
+            info!(
+                file_size = file_len,
+                "Recovery scan completed - no torn records found"
+            );
+        }
+
+        Ok(last_valid_pos)
+    }
 }
 
 impl Drop for Store {
@@ -374,6 +450,7 @@ mod tests {
 
     #[test]
     fn test_read_beyond_end() {
+        init_tracing();
         let temp_file = NamedTempFile::new().unwrap();
         let store = Store::new(temp_file.path()).unwrap();
 
@@ -391,6 +468,7 @@ mod tests {
 
     #[test]
     fn test_error_recovery_info() {
+        init_tracing();
         let temp_file = NamedTempFile::new().unwrap();
         let store = Store::new(temp_file.path()).unwrap();
 
@@ -398,5 +476,58 @@ mod tests {
         if let Err(err) = result {
             assert!(!err.is_recoverable());
         }
+    }
+
+    #[test]
+    fn test_recovery_scan_torn_record() -> StorageResult<()> {
+        init_tracing();
+        let temp_file = NamedTempFile::new().unwrap();
+        let path = temp_file.path().to_owned();
+
+        // Write some valid records
+        {
+            let mut store = Store::new(&path)?;
+            store.append(b"First store record")?;
+            store.append(b"Second store record")?;
+        }
+
+        // manually create a corrupted entry which will simulate a crash during entry
+        {
+            use std::io::{Seek, SeekFrom, Write};
+
+            let mut file = OpenOptions::new()
+                .write(true)
+                .truncate(false)
+                .open(&path)
+                .unwrap();
+
+            file.seek(SeekFrom::End(0)).unwrap();
+
+            // write a fake length header
+            let fake_len: u64 = 50;
+            file.write_all(&fake_len.to_le_bytes()).unwrap();
+
+            // write only 10 bytes to simulate crash. length and actual data will be inconsistent
+            file.write_all(b"i crashed!").unwrap();
+            file.sync_all().unwrap();
+        }
+
+        // Reopen - recovery should detect and fix the corrupted record
+
+        {
+            let store = Store::new(&path)?;
+            let (data1, _) = store.read(0)?;
+            assert_eq!(data1, b"First store record");
+
+            // second record should be at 8 bytes len + 18 bytes data = 26
+            let (data2, _) = store.read(26)?;
+            assert_eq!(data2, b"Second store record");
+
+            //Total valid size should be: first record (26 bytes) + second record (27 bytes)
+            let result = store.read(53);
+            assert!(matches!(result, Err(StorageError::ReadBeyondEnd { .. })))
+        }
+
+        Ok(())
     }
 }
