@@ -262,6 +262,7 @@ impl Store {
 
         while pos < file_len {
             // Check if we have enough bytes for a length prefix
+            // c
             if pos + LEN_WIDTH > file_len {
                 warn!(
                     position = pos,
