@@ -78,8 +78,7 @@ jobs:
           workspaces: service
 
       - name: Run tests
-        run: cargo test
-        working-directory: ./service
+        run: RUST_LOG=info cargo test
 
   # cross-platform:
   #   runs-on: ${{ matrix.os }}
