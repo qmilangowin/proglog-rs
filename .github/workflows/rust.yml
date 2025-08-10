@@ -39,12 +39,9 @@ jobs:
 
       - name: Configure Rust cache
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: service
 
       - name: Check formatting
         run: cargo fmt --all -- --check
-        working-directory: ./service
 
   clippy:
     name: Clippy Linting
@@ -60,12 +57,9 @@ jobs:
 
       - name: Configure Rust cache
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: service
 
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
-        working-directory: ./service
 
   test:
     name: Test Suite
