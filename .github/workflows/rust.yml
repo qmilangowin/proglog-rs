@@ -74,8 +74,6 @@ jobs:
 
       - name: Configure Rust cache
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: service
 
       - name: Run tests
         run: RUST_LOG=info cargo test
