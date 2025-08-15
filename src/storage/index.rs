@@ -169,7 +169,8 @@ impl Index {
         Ok(())
     }
 
-    /// Reads the position for a given offset using binary search
+    /// Reads the position for a given offset using linear search
+    /// Note: We use linear search because entries are stored in order of arrival, not sorted by offset
     #[instrument(skip(self), fields(offset))]
     pub fn read(&self, offset: u64) -> IndexResult<u64> {
         debug!(
@@ -182,24 +183,22 @@ impl Index {
             return Err(IndexError::OffsetNotFound { offset });
         }
 
-        // Binary search for the offset
-        let mut left = 0u64;
-        let mut right = self.size;
-
-        while left < right {
-            let mid = left + (right - left) / 2;
-            let entry_offset = self.read_offset_at_index(mid)?;
-
-            match entry_offset.cmp(&offset) {
-                std::cmp::Ordering::Equal => {
-                    let position = self.read_position_at_index(mid)?;
-                    debug!(offset, position, entry_index = mid, "Found offset in index");
-                    return Ok(position);
-                }
-                std::cmp::Ordering::Less => left = mid + 1,
-                std::cmp::Ordering::Greater => right = mid,
+        // We can use linear search here. Not super optimal but we can change it later if needed.
+        // to a sorted segment with binary search. Used by Kafka for example and is the distributed long standard.
+        for index in 0..self.size {
+            let entry_offset = self.read_offset_at_index(index)?;
+            if entry_offset == offset {
+                let position = self.read_position_at_index(index)?;
+                debug!(
+                    offset,
+                    position,
+                    entry_index = index,
+                    "Found offset in index"
+                );
+                return Ok(position);
             }
         }
+
         warn!(offset, "Offset not found at index");
         Err(IndexError::OffsetNotFound { offset })
     }
@@ -319,6 +318,105 @@ mod tests {
         let position = index.read(0)?;
         assert_eq!(position, 100);
         assert_eq!(index.len(), 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_index_multiple_entries() -> IndexResult<()> {
+        init_tracing();
+        let temp_file = NamedTempFile::new().unwrap();
+        let mut index = Index::new(temp_file.path())?;
+
+        // Write multiple entries in order
+        let entries = [(0, 0), (1, 150), (2, 300), (3, 500)];
+
+        for (offset, position) in entries {
+            index.write(offset, position)?;
+        }
+
+        // Read them all back
+        for (offset, expected_position) in entries {
+            let position = index.read(offset)?;
+            assert_eq!(position, expected_position);
+        }
+
+        assert_eq!(index.len(), 4);
+        Ok(())
+    }
+
+    #[test]
+    fn test_index_out_of_order_writes() -> IndexResult<()> {
+        init_tracing();
+        let temp_file = NamedTempFile::new().unwrap();
+        let mut index = Index::new(temp_file.path())?;
+
+        // Write entries out of order (simulating distributed arrival)
+        index.write(5, 500)?; // 6th record arrives first
+        index.write(1, 100)?; // 2nd record arrives second  
+        index.write(3, 300)?; // 4th record arrives third
+
+        // Should still be able to find them
+        assert_eq!(index.read(5)?, 500);
+        assert_eq!(index.read(1)?, 100);
+        assert_eq!(index.read(3)?, 300);
+
+        // Non-existent offset should fail
+        assert!(matches!(
+            index.read(2),
+            Err(IndexError::OffsetNotFound { offset: 2 })
+        ));
+        assert!(matches!(
+            index.read(4),
+            Err(IndexError::OffsetNotFound { offset: 4 })
+        ));
+
+        assert_eq!(index.len(), 3);
+        Ok(())
+    }
+
+    #[test]
+    fn test_index_persistence() -> IndexResult<()> {
+        init_tracing();
+        let temp_file = NamedTempFile::new().unwrap();
+        let path = temp_file.path().to_owned();
+
+        // Write some entries and close the index
+        {
+            let mut index = Index::new(&path)?;
+            index.write(0, 100)?;
+            index.write(1, 200)?;
+            index.write(2, 300)?;
+        } // Index drops here, should flush to disk
+
+        // Reopen and verify persistence
+        {
+            let index = Index::new(&path)?;
+            assert_eq!(index.len(), 3);
+            assert_eq!(index.read(0)?, 100);
+            assert_eq!(index.read(1)?, 200);
+            assert_eq!(index.read(2)?, 300);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_index_empty_operations() -> IndexResult<()> {
+        init_tracing();
+        let temp_file = NamedTempFile::new().unwrap();
+        let index = Index::new(temp_file.path())?;
+
+        // Empty index should report correct state
+        assert!(index.is_empty());
+        assert_eq!(index.len(), 0);
+        assert_eq!(index.size(), 0);
+
+        // Reading from empty index should fail
+        assert!(matches!(
+            index.read(0),
+            Err(IndexError::OffsetNotFound { offset: 0 })
+        ));
 
         Ok(())
     }
