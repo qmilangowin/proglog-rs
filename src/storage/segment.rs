@@ -39,10 +39,10 @@ impl Segment {
             for i in 0..index.len() {
                 let offset = index.read_offset_at_index(i)?;
                 if offset > highest_offset {
-                    highest_offset = offset + 1;
+                    highest_offset = offset;
                 }
             }
-            highest_offset
+            highest_offset + 1
         };
         info!(
             base_offset,
