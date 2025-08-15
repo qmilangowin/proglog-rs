@@ -8,6 +8,10 @@ default:
 build:
     cargo build
 
+# Run cargo check
+check:
+    cargo check
+
 # Build in release mode
 build-release:
     cargo build --release

@@ -26,13 +26,76 @@ src/
 └── errors.rs              # Custom error types
 ```
 
+## Storage Architecture
+
+The log uses a two-file approach: a **Store** (append-only data file) and an **Index** (offset-to-position mapping).
+
+```
+                    WRITE OPERATION
+    ┌─────────────────────────────────────────────────────┐
+    │                                                     │
+    │  1. Write record to Store                           │
+    │     ┌─────────────────────────┐                     │
+    │     │     STORE FILE          │                     │
+    │     │  ┌───────────────────┐  │                     │
+    │     │  │ [8-byte len][data] │  │ ← Append record    │
+    │     │  └───────────────────┘  │                     │
+    │     └─────────────────────────┘                     │
+    │              │                                      │
+    │              │ Returns position (e.g., 1024)       │
+    │              ▼                                      │
+    │  2. Write mapping to Index                          │
+    │     ┌─────────────────────────┐                     │
+    │     │     INDEX FILE          │                     │
+    │     │  ┌─────────────────────┐│                     │
+    │     │  │ [offset][position]  ││ ← Map offset 5      │
+    │     │  │   [5]   [1024]      ││   to position 1024  │
+    │     │  └─────────────────────┘│                     │
+    │     └─────────────────────────┘                     │
+    └─────────────────────────────────────────────────────┘
+
+                     READ OPERATION
+    ┌─────────────────────────────────────────────────────┐
+    │                                                     │
+    │  1. Lookup offset in Index                          │
+    │     ┌─────────────────────────┐                     │
+    │     │     INDEX FILE          │                     │
+    │     │  ┌─────────────────────┐│                     │
+    │     │  │ Find offset 5       ││ → Returns position  │
+    │     │  │ Returns: 1024       ││   1024              │
+    │     │  └─────────────────────┘│                     │
+    │     └─────────────────────────┘                     │
+    │              │                                      │
+    │              │ Position: 1024                       │
+    │              ▼                                      │
+    │  2. Read record from Store at position              │
+    │     ┌─────────────────────────┐                     │
+    │     │     STORE FILE          │                     │
+    │     │  ┌───────────────────┐  │                     │
+    │     │  │ Read at pos 1024  │  │ → Returns record    │
+    │     │  │ [8-byte len][data] │  │   data              │
+    │     │  └───────────────────┘  │                     │
+    │     └─────────────────────────┘                     │
+    └─────────────────────────────────────────────────────┘
+```
+
 ## Storage Format
 
-Records are stored as length-prefixed entries:
+Records are stored as length-prefixed entries in the Store:
 
 ```
 [8-byte length][record data][8-byte length][record data]...
 ```
+
+Index entries map logical offsets to physical positions:
+
+```
+[8-byte offset][8-byte position][8-byte offset][8-byte position]...
+```
+
+where *offset* denotes the numerical key of the record.
+
+
 
 ### Example
 

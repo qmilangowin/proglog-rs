@@ -1,4 +1,5 @@
-use crate::errors::{StorageError, StorageResult};
+use crate::StorageResult;
+use crate::errors::StorageError;
 use crate::storage::StorageContext;
 use memmap2::{MmapMut, MmapOptions};
 use std::fs::{File, OpenOptions};
