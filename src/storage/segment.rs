@@ -161,3 +161,188 @@ impl Segment {
         self.index.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Once;
+    use tempfile::TempDir;
+    use tracing_subscriber::{EnvFilter, fmt};
+
+    static INIT_TRACING: Once = Once::new();
+
+    fn init_tracing() {
+        INIT_TRACING.call_once(|| {
+            let _ = fmt()
+                .with_env_filter(
+                    EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")),
+                )
+                .with_test_writer()
+                .try_init();
+        });
+    }
+
+    #[test]
+    fn test_segment_append_and_read() -> SegmentResult<()> {
+        init_tracing();
+        let temp_dir = TempDir::new().unwrap();
+        let store_path = temp_dir.path().join("segment.log");
+        let index_path = temp_dir.path().join("segment.idx");
+
+        let mut segment = Segment::new(&store_path, &index_path, 0, 1024 * 1024, 1000)?;
+
+        let data = b"Hello, Segment!";
+        let offset = segment.append(data)?;
+
+        assert_eq!(offset, 0);
+        assert_eq!(segment.next_offset(), 1);
+        assert!(!segment.is_empty());
+
+        let read_data = segment.read(offset)?;
+        assert_eq!(read_data, data);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_segment_sequential_offsets() -> SegmentResult<()> {
+        init_tracing();
+        let temp_dir = TempDir::new().unwrap();
+        let store_path = temp_dir.path().join("segment.log");
+        let index_path = temp_dir.path().join("segment.idx");
+
+        let mut segment = Segment::new(
+            &store_path,
+            &index_path,
+            100, // base_offset = 100
+            1024 * 1024,
+            1000,
+        )?;
+
+        let records = ["First", "Second", "Third"];
+        let mut offsets = Vec::new();
+
+        // Append multiple records
+        for record in &records {
+            let offset = segment.append(record.as_bytes())?;
+            offsets.push(offset);
+        }
+
+        // Verify sequential offsets starting from base_offset
+        assert_eq!(offsets, vec![100, 101, 102]);
+        assert_eq!(segment.next_offset(), 103);
+
+        // Read all records back
+        for (i, &offset) in offsets.iter().enumerate() {
+            let data = segment.read(offset)?;
+            assert_eq!(data, records[i].as_bytes());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_segment_offset_bounds_checking() -> SegmentResult<()> {
+        init_tracing();
+        let temp_dir = TempDir::new().unwrap();
+        let store_path = temp_dir.path().join("segment.log");
+        let index_path = temp_dir.path().join("segment.idx");
+
+        let mut segment = Segment::new(&store_path, &index_path, 50, 1024 * 1024, 1000)?;
+
+        // Add one record (gets offset 50)
+        segment.append(b"test")?;
+
+        // Test bounds checking
+        assert!(segment.contains_offset(50)); // Valid
+        assert!(!segment.contains_offset(49)); // Below base
+        assert!(!segment.contains_offset(51)); // Beyond next
+
+        // Reading out-of-range offsets should fail
+        assert!(matches!(
+            segment.read(49),
+            Err(SegmentError::OffsetOutOfRange { offset: 49, .. })
+        ));
+
+        assert!(matches!(
+            segment.read(51),
+            Err(SegmentError::OffsetOutOfRange { offset: 51, .. })
+        ));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_segment_full_detection() -> SegmentResult<()> {
+        init_tracing();
+        let temp_dir = TempDir::new().unwrap();
+        let store_path = temp_dir.path().join("segment.log");
+        let index_path = temp_dir.path().join("segment.idx");
+
+        let mut segment = Segment::new(&store_path, &index_path, 0, 75, 10)?;
+
+        assert!(!segment.is_full());
+
+        // Fill up the segment (each record is 8 bytes header + 7 bytes data = 15 bytes total)
+        for i in 0..5 {
+            let data = format!("record{i}");
+            segment.append(data.as_bytes())?;
+        }
+
+        // After 5 records: 5 * 15 = 75 bytes, which should trigger is_full()
+        assert!(segment.is_full());
+
+        assert!(matches!(
+            segment.append(b"overflow"),
+            Err(SegmentError::SegmentFull { .. })
+        ));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_segment_persistence() -> SegmentResult<()> {
+        init_tracing();
+        let temp_dir = TempDir::new().unwrap();
+        let store_path = temp_dir.path().join("segment.log");
+        let index_path = temp_dir.path().join("segment.idx");
+
+        let records = ["Persistent", "Data", "Test"];
+
+        // Write data and close segment
+        {
+            let mut segment = Segment::new(
+                &store_path,
+                &index_path,
+                200, // base_offset = 200
+                1024 * 1024,
+                1000,
+            )?;
+
+            for record in &records {
+                segment.append(record.as_bytes())?;
+            }
+        }
+        // Reopen segment and verify data
+        {
+            let segment = Segment::new(
+                &store_path,
+                &index_path,
+                200, // Same base_offset
+                1024 * 1024,
+                1000,
+            )?;
+
+            assert_eq!(segment.next_offset(), 203);
+
+            // Should be able to read all records
+            for (i, record) in records.iter().enumerate() {
+                let offset = 200 + i as u64;
+                let data = segment.read(offset)?;
+                assert_eq!(data, record.as_bytes());
+            }
+        }
+
+        Ok(())
+    }
+}
