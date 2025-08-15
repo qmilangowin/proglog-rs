@@ -119,6 +119,29 @@ pub enum IndexError {
     InvalidOffset { offset: u64, min_offset: u64 },
 }
 
+#[derive(Debug, Error)]
+pub enum SegmentError {
+    #[error("Segment is full: base={base_offset}, size={current_size}/{max_size}")]
+    SegmentFull {
+        base_offset: u64,
+        max_size: u64,
+        current_size: u64,
+    },
+
+    #[error("Offset {offset} out of range for segment {base_offset}..{next_offset}")]
+    OffsetOutOfRange {
+        offset: u64,
+        base_offset: u64,
+        next_offset: u64,
+    },
+
+    #[error("Storage error: {0}")]
+    Storage(#[from] StorageError),
+
+    #[error("Index error: {0}")]
+    Index(#[from] IndexError),
+}
+
 /// Network-related errors
 #[derive(Error, Debug)]
 pub enum NetworkError {

@@ -204,7 +204,7 @@ impl Index {
     }
 
     /// Helper: Read offset at a specific entry index
-    fn read_offset_at_index(&self, index: u64) -> IndexResult<u64> {
+    pub fn read_offset_at_index(&self, index: u64) -> IndexResult<u64> {
         if index >= self.size {
             return Err(IndexError::CorruptedEntry { position: index });
         }
@@ -221,7 +221,7 @@ impl Index {
     }
 
     /// Helper: Read position at a specific entry index
-    fn read_position_at_index(&self, index: u64) -> IndexResult<u64> {
+    pub fn read_position_at_index(&self, index: u64) -> IndexResult<u64> {
         if index >= self.size {
             return Err(IndexError::CorruptedEntry { position: index });
         }

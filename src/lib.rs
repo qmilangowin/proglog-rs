@@ -10,3 +10,4 @@ use crate::errors::*;
 pub type ProglogResult<T> = Result<T, ProglogError>;
 pub type StorageResult<T> = Result<T, StorageError>;
 pub type IndexResult<T> = Result<T, IndexError>;
+pub type SegmentResult<T> = Result<T, SegmentError>;
