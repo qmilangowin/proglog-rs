@@ -1,5 +1,5 @@
 //! Segment combines the Store and Index to provide a logical log segment
-//! Each stement handles a contiguous range of offsets and manages the coordination between storing data and indexing it.
+//! Each segment handles a contiguous range of offsets and manages the coordination between storing data and indexing it.
 use crate::SegmentResult;
 use crate::errors::SegmentError;
 use crate::storage::index::Index;
@@ -38,7 +38,7 @@ impl Segment {
             let mut highest_offset = base_offset;
             for i in 0..index.len() {
                 let offset = index.read_offset_at_index(i)?;
-                if offset >= highest_offset {
+                if offset > highest_offset {
                     highest_offset = offset + 1;
                 }
             }
