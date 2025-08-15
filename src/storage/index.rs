@@ -14,7 +14,7 @@ use tracing::{debug, info, instrument, warn};
 // Each index entry: 8 bytes offset + 8 bytes position = 16 bytes
 const OFFSET_WIDTH: u64 = 8;
 const POSITION_WIDTH: u64 = 8;
-const ENTRY_WIDTH: u64 = 16; // OFFSET_WIDTH + ENTRY_WIDTH
+const ENTRY_WIDTH: u64 = 16; // OFFSET_WIDTH + POSITION_WIDTH
 
 /// Index provides fast lookups from log offsets/indexes to positions in the Store.
 /// Each entry maps a sequential offset to a byt position in the Store file.
@@ -31,7 +31,7 @@ pub struct Index {
 
 impl Index {
     #[instrument(skip_all, fields(path = ?path.as_ref()))]
-    /// Create a new inxed from the given file path.
+    /// Create a new index from the given file path.
     /// If the file doesn't exist, create it
     pub fn new(path: impl AsRef<Path>) -> IndexResult<Self> {
         debug!("Opening index file");
@@ -61,7 +61,7 @@ impl Index {
             let valid_size = (file_len / ENTRY_WIDTH) * ENTRY_WIDTH;
             file.set_len(valid_size)
                 .map_err(|e| IndexError::CorruptedFile {
-                    reason: format!("Filed to truncate corrupted index file: {e}"),
+                    reason: format!("Failed to truncate corrupted index file: {e}"),
                 })?;
 
             debug!(
@@ -91,19 +91,19 @@ impl Index {
                 .with_mmap_context(initial_size)?
         };
 
-        let num_entires = file_len / ENTRY_WIDTH;
+        let num_entries = file_len / ENTRY_WIDTH;
 
         info!(
             file_size = file_len,
             map_size = initial_size,
-            num_entires = num_entires,
+            num_entries = num_entries,
             "Index created successfully"
         );
 
         Ok(Index {
             file,
             mmap,
-            size: num_entires,
+            size: num_entries,
         })
     }
 
@@ -175,7 +175,7 @@ impl Index {
     pub fn read(&self, offset: u64) -> IndexResult<u64> {
         debug!(
             offset,
-            total_entires = self.size,
+            total_entries = self.size,
             "Reading position for offset"
         );
 
