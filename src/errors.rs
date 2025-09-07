@@ -144,6 +144,12 @@ pub enum SegmentError {
 
 #[derive(Debug, Error)]
 pub enum LogError {
+    #[error("Failed to cleanup segment {base_offset}")]
+    CleanupError {
+        base_offset: u64,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("Directory error for path {path}")]
     DirectoryError {
         path: String,

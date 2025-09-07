@@ -1,7 +1,8 @@
 //! Log here is a collection of segments that abstracts a single continous distributed log.
-use crate::LogResult;
 use crate::errors::LogError;
 use crate::storage::segment::Segment;
+use crate::storage::traits::StorageCleanup;
+use crate::{LogResult, storage::traits::LocalFileSystem};
 use std::fs;
 use std::path::PathBuf;
 use tracing::{debug, info, instrument, warn};
@@ -128,25 +129,47 @@ impl Log {
         self.segments.iter().map(|s| s.store_size()).sum()
     }
 
+    /// truncates the log and keeps only the segments that are less than the truncate point
     #[instrument(skip(self), fields(offset))]
     pub fn truncate(&mut self, offset: u64) -> LogResult<()> {
         info!(offset, "Truncating log");
 
-        let mut segments_to_keep = Vec::new();
+        let cleanup = LocalFileSystem;
+        let mut segments_to_remove = Vec::new();
 
         for segment in &self.segments {
-            if segment.base_offset() < offset {
-                segments_to_keep.push(segment);
-            } else {
-                //TODO: remove sgment files
-                warn!(
-                    segment_base = segment.base_offset(),
-                    "Segment would be removed (file cleanup not yet implemented)"
-                );
+            if segment.base_offset() >= offset {
+                segments_to_remove.push(segment.base_offset());
             }
         }
 
-        // TODO: implement actual segment removal. For now adjust next_offset
+        for base_offset in segments_to_remove {
+            let store_path = self.config.log_dir.join(format!("{base_offset:020}.log"));
+            let index_path = self.config.log_dir.join(format!("{base_offset:020}.idx"));
+
+            cleanup
+                .cleanup_segment(&store_path, &index_path)
+                .map_err(|e| LogError::CleanupError {
+                    base_offset,
+                    source: e.into(),
+                })?;
+        }
+        self.segments
+            .retain(|segment| segment.base_offset() < offset);
+
+        // this is for the edge case so that we always at least have one segment
+        if self.segments.is_empty() {
+            // Create a new segment starting at the truncate offset
+            let segment = self.create_segment(offset)?;
+            self.segments.push(segment);
+            self.active_segment_index = 0;
+        }
+
+        // Update active segment index if needed
+        if self.active_segment_index >= self.segments.len() && !self.segments.is_empty() {
+            self.active_segment_index = self.segments.len() - 1;
+        }
+
         self.next_offset = offset;
 
         info!(offset, "Log truncated");
