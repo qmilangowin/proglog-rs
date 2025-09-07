@@ -3,6 +3,7 @@ use crate::errors::StorageError;
 use crate::{IndexResult, StorageResult};
 use std::io;
 pub mod index;
+pub mod log;
 pub mod segment;
 pub mod store;
 pub trait StorageContext<T> {
