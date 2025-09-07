@@ -142,6 +142,30 @@ pub enum SegmentError {
     Index(#[from] IndexError),
 }
 
+#[derive(Debug, Error)]
+pub enum LogError {
+    #[error("Failed to cleanup segment {base_offset}")]
+    CleanupError {
+        base_offset: u64,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error("Directory error for path {path}")]
+    DirectoryError {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("Offset {offset} not found (range: {base_offset}..{next_offset})")]
+    OffsetNotFound {
+        offset: u64,
+        base_offset: u64,
+        next_offset: u64,
+    },
+    #[error("Segment error: {0}")]
+    Segment(#[from] SegmentError), //converts SegmentError to LogError via From trait implementation. Convienence macro
+}
+
 /// Network-related errors
 #[derive(Error, Debug)]
 pub enum NetworkError {

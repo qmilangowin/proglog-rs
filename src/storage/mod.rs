@@ -3,8 +3,10 @@ use crate::errors::StorageError;
 use crate::{IndexResult, StorageResult};
 use std::io;
 pub mod index;
+pub mod log;
 pub mod segment;
 pub mod store;
+pub mod traits;
 pub trait StorageContext<T> {
     fn with_open_context(self, path: &str) -> StorageResult<T>;
     fn with_write_context(self, position: u64) -> StorageResult<T>;
