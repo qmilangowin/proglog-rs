@@ -237,3 +237,139 @@ impl Log {
         &mut self.segments[self.active_segment_index]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Once;
+    use tempfile::TempDir;
+    use tracing_subscriber::{EnvFilter, fmt};
+
+    static INIT_TRACING: Once = Once::new();
+
+    fn init_tracing() {
+        INIT_TRACING.call_once(|| {
+            let _ = fmt()
+                .with_env_filter(
+                    EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")),
+                )
+                .with_test_writer()
+                .try_init();
+        });
+    }
+
+    fn test_config(temp_dir: &TempDir) -> LogConfig {
+        LogConfig {
+            max_store_bytes: 200, //we keep this small to test rotation later
+            max_index_entries: 10,
+            log_dir: temp_dir.path().to_path_buf(),
+        }
+    }
+
+    #[test]
+    fn test_log_append_and_read() -> LogResult<()> {
+        init_tracing();
+        let temp_dir = TempDir::new().unwrap();
+        let mut log = Log::new(test_config(&temp_dir))?;
+
+        let data = b"Hello, Log!";
+        let offset = log.append(data)?;
+
+        assert_eq!(offset, 0);
+        assert_eq!(log.next_offset(), 1);
+        assert!(!log.is_empty());
+
+        let read_data = log.read(offset)?;
+        assert_eq!(read_data, data);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_multiple_records() -> LogResult<()> {
+        init_tracing();
+        let temp_dir = TempDir::new().unwrap();
+        let mut log = Log::new(test_config(&temp_dir))?;
+
+        let records = ["First", "Second", "Third", "Fourth"];
+        let mut offsets = Vec::new();
+
+        for record in records {
+            let offset = log.append(record.as_bytes())?;
+            offsets.push(offset);
+        }
+
+        assert_eq!(offsets, vec![0, 1, 2, 3]);
+        assert_eq!(log.next_offset(), 4);
+        assert_eq!(log.latest_offset(), Some(3));
+
+        for (i, &offset) in offsets.iter().enumerate() {
+            let data = log.read(offset)?;
+            assert_eq!(data, records[i].as_bytes());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_log_segment_rotation() -> LogResult<()> {
+        init_tracing();
+        let temp_dir = TempDir::new().unwrap();
+        let mut log = Log::new(test_config(&temp_dir))?;
+
+        assert_eq!(log.segment_count(), 1);
+
+        // Add enough data to trigger segment rotation
+        // Each record is roughly 8 + data bytes, so ~15 bytes per record
+        // With max_store_bytes = 200, we need about 13-14 records
+        for i in 0..15 {
+            let data = format!("Record number {i}");
+            log.append(data.as_bytes())?;
+        }
+
+        // Should have rotated to multiple segments
+        assert!(log.segment_count() > 1);
+
+        // Should still be able to read all records
+        for i in 0..15 {
+            let data = log.read(i)?;
+            let expected = format!("Record number {i}");
+            assert_eq!(data, expected.as_bytes());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_log_offset_not_found() -> LogResult<()> {
+        init_tracing();
+        let temp_dir = TempDir::new().unwrap();
+        let mut log = Log::new(test_config(&temp_dir))?;
+
+        // Add one record
+        log.append(b"test")?;
+
+        // Try to read non-existent offset
+        assert!(matches!(
+            log.read(999),
+            Err(LogError::OffsetNotFound { offset: 999, .. })
+        ));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_log_empty_state() -> LogResult<()> {
+        init_tracing();
+        let temp_dir = TempDir::new().unwrap();
+        let log = Log::new(test_config(&temp_dir))?;
+
+        assert!(log.is_empty());
+        assert_eq!(log.next_offset(), 0);
+        assert_eq!(log.base_offset(), 0);
+        assert_eq!(log.latest_offset(), None);
+        assert_eq!(log.segment_count(), 1);
+
+        Ok(())
+    }
+}
