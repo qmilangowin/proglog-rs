@@ -156,7 +156,7 @@ pub enum LogError {
         #[source]
         source: std::io::Error,
     },
-    #[error("Offset {offset} not found (range: {base_offset}..{next_offset}")]
+    #[error("Offset {offset} not found (range: {base_offset}..{next_offset})")]
     OffsetNotFound {
         offset: u64,
         base_offset: u64,
