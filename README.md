@@ -2,6 +2,8 @@
 
 A distributed commit log implementation in Rust, inspired by "Distributed Services with Go" by Travis Jeffery.
 
+NB: Still WIP when I have time. Not yet complete.
+
 ## Project Structure
 
 ```
