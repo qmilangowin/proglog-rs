@@ -17,7 +17,7 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
 [build-dependencies]
-tonic-build = "0.11"
+tonic-build = "0.14"
 
 [dev-dependencies]
 criterion = "0.7.0"
