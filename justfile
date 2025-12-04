@@ -77,6 +77,14 @@ dev-setup:
     cargo install cargo-watch
     rustup component add clippy rustfmt
 
+# Install pre-commit hooks
+pre-commit-install:
+    pre-commit install
+
+# Run pre-commit on all files
+pre-commit:
+    pre-commit run --all-files
+
 # Quick development cycle - format, clippy, test
 dev: fmt clippy test
 

@@ -71,7 +71,7 @@ pub enum StorageError {
     ReadOnly,
 }
 
-/// Index-related errors  
+/// Index-related errors
 #[derive(Error, Debug)]
 pub enum IndexError {
     #[error("Failed to open index file: {path}")]
