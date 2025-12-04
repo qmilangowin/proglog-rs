@@ -16,7 +16,7 @@ src/
 │   └── index.rs           # Offset index (fast lookups)
 ├── server/
 │   ├── mod.rs             # Server module root
-│   ├── grpc.rs            # gRPC service implementation  
+│   ├── grpc.rs            # gRPC service implementation
 │   └── auth.rs            # Authentication and TLS
 ├── discovery/
 │   ├── mod.rs             # Service discovery

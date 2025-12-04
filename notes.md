@@ -38,5 +38,3 @@ fn main() -> anyhow::Result<()> {
 }
 
 ```
-
-

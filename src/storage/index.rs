@@ -21,7 +21,7 @@ const ENTRY_WIDTH: u64 = 16; // OFFSET_WIDTH + POSITION_WIDTH
 ///
 /// Format: [8-byte offset][8-byte position][8-byte offset][8-byte position] etc.
 /// Entry 0: [8-byte offset][8-byte position] = bytes 0-15 where the offset denotes the log-record count.
-/// Entry 1: [8-byte offset][8-byte position] = bytes 16-31  
+/// Entry 1: [8-byte offset][8-byte position] = bytes 16-31
 /// Entry 2: [8-byte offset][8-byte position] = bytes 32-47
 pub struct Index {
     file: File,
@@ -353,7 +353,7 @@ mod tests {
 
         // Write entries out of order (simulating distributed arrival)
         index.write(5, 500)?; // 6th record arrives first
-        index.write(1, 100)?; // 2nd record arrives second  
+        index.write(1, 100)?; // 2nd record arrives second
         index.write(3, 300)?; // 4th record arrives third
 
         // Should still be able to find them

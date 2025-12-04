@@ -1,0 +1,39 @@
+version: 2
+
+updates:
+  # Cargo dependencies
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      storage:
+        patterns:
+          - "bytes*"
+          - "memmap2*"
+      testing:
+        patterns:
+          - "tempfile*"
+          - "criterion*"
+      logging:
+        patterns:
+          - "tracing*"
+          - "env_logger*"
+      rust-core:
+        patterns:
+          - "tokio*"
+          - "serde*"
+          - "thiserror*"
+      # Uncomment when gRPC is added
+      # grpc:
+      #   patterns:
+      #     - "tonic*"
+      #     - "prost*"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
