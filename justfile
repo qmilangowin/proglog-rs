@@ -64,6 +64,9 @@ clean:
 docs:
     cargo doc --open --no-deps
 
+bacon:
+    bacon
+
 # Run benchmarks (when we add criterion)
 bench:
     cargo bench
