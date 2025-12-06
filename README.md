@@ -182,13 +182,33 @@ if record_len > 100MB { break; }
 
 ## Features
 
+## Features
+
+## Features
+
+### Storage Layer ✅
+
 - ✅ **Crash-safe storage** with automatic recovery
 - ✅ **Memory-mapped I/O** for high performance
-- ✅ **Structured error handling** with recovery guidance
-- ✅ **Comprehensive testing** including corruption scenarios
-- 🚧 **Index layer** for fast offset lookups (in progress)
-- 🚧 **gRPC networking** (planned)
-- 🚧 **Raft consensus** (planned)
+- ✅ **Append-only Store** with length-prefixed records
+- ✅ **Index layer** for fast offset-to-position lookups
+- ✅ **Segment management** with automatic rotation
+- ✅ **Log abstraction** managing multiple segments as unified log
+- ✅ **Structured error handling** with comprehensive testing
+
+### Network Layer ✅
+
+- ✅ **gRPC server** with Protocol Buffers API
+- ✅ **Produce/Consume operations** (Kafka-style naming)
+- ✅ **Thread-safe concurrent access**
+- ✅ **Persistence on restart** - loads existing segments automatically
+
+### Planned Features 🚧
+
+- 🚧 **Service Discovery** - Cluster membership
+- 🚧 **Raft Consensus** - Leader election and log replication
+- 🚧 **Security** - TLS, authentication, authorization
+- 🚧 **Observability** - Metrics, distributed tracing
 
 ## Development
 
