@@ -76,6 +76,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Configure Rust cache
         uses: Swatinem/rust-cache@v2
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Run tests
         run: RUST_LOG=info cargo test
 
