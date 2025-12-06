@@ -7,7 +7,7 @@ use log::info;
 use proglog_rs::server::grpc::{LogService, proto};
 use proglog_rs::storage::log::{Log, LogConfig};
 use proto::log_server::LogServer;
-use std::fs::create_dir;
+use std::fs::create_dir_all;
 use std::path::PathBuf;
 use tonic::transport::Server;
 
@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("starting proglog-rs gRPC server");
 
     let log_dir = PathBuf::from("data");
-    create_dir(&log_dir)?;
+    create_dir_all(&log_dir)?;
 
     let config = LogConfig {
         max_store_bytes: 1024 * 1024,
@@ -27,6 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let prog_log = Log::new(config)?;
+
     info!("Log initialized in ./data directory");
 
     let log_service = LogService::new(prog_log);
