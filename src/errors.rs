@@ -183,6 +183,12 @@ pub enum NetworkError {
 
     #[error("Server unavailable")]
     ServerUnavailable,
+
+    #[error("Lock poisoned")]
+    LockPoisoned,
+
+    #[error("Task execution failed: {0}")]
+    TaskFailed(String),
 }
 
 /// Consensus-related errors

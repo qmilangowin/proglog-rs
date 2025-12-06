@@ -101,12 +101,59 @@ where *offset* denotes the numerical key of the record.
 
 ### Example
 
-| Offset | Bytes                            | Meaning                    |
-|--------|----------------------------------|----------------------------|
-| 0–7    | 05 00 00 00 00 00 00 00          | Length = 5                |
-| 8–12   | 68 65 6C 6C 6F                   | "hello"                   |
-| 13–20  | 08 00 00 00 00 00 00 00          | Length = 8                |
-| 21–28  | 77 6F 72 6C 64 21 21 21          | "world!!!"                |
+**Store File:**
+
+| Position | Bytes                            | Meaning                    |
+|----------|----------------------------------|----------------------------|
+| 0–7      | 05 00 00 00 00 00 00 00         | Length = 5                |
+| 8–12     | 68 65 6C 6C 6F                  | "hello"                   |
+| 13–20    | 08 00 00 00 00 00 00 00         | Length = 8                |
+| 21–28    | 77 6F 72 6C 64 21 21 21         | "world!!!"                |
+
+**Index File (maps record numbers to store positions):**
+
+| Position | Bytes                            | Meaning                           |
+|----------|----------------------------------|-----------------------------------|
+| 0–7      | 00 00 00 00 00 00 00 00         | Record offset = 0                |
+| 8–15     | 00 00 00 00 00 00 00 00         | Store position = 0 (→ "hello")   |
+| 16–23    | 01 00 00 00 00 00 00 00         | Record offset = 1                |
+| 24–31    | 0D 00 00 00 00 00 00 00         | Store position = 13 (→ "world!!!") |
+
+### How Reading Works - Step by Step
+
+**Example: "I want to read record #1"**
+
+```
+Step 1: Calculate Index position
+  - Each Index entry is 16 bytes (8-byte offset + 8-byte position)
+  - Record #1 is the 2nd entry (0-indexed)
+  - Index position = 1 × 16 = byte 16
+
+Step 2: Read from Index at byte 16
+  - Read 16 bytes starting at position 16
+  - Bytes 16-23: [01 00 00 00 00 00 00 00] = offset 1 ✓ (confirms we have the right entry)
+  - Bytes 24-31: [0D 00 00 00 00 00 00 00] = position 13 (0x0D = 13 decimal)
+
+Step 3: Read from Store at byte 13
+  - Jump to Store file position 13
+  - Read 8 bytes: [08 00 00 00 00 00 00 00] = length is 8
+  - Read next 8 bytes: [77 6F 72 6C 64 21 21 21] = "world!!!"
+
+Result: Record #1 contains "world!!!"
+```
+
+**Visual Flow:**
+```
+Request: "Get record 1"
+         ↓
+    INDEX FILE                          STORE FILE
+    [offset][position]                  [length][data]
+    ─────────────────                   ──────────────
+    [0][0]   ← record 0      ┌─────→    [5][hello]     ← position 0
+    [1][13]  ← record 1 ─────┘          [8][world!!!]  ← position 13
+         ↑
+    "Found it! Go to position 13"
+```
 
 ## Crash Recovery
 
@@ -135,13 +182,33 @@ if record_len > 100MB { break; }
 
 ## Features
 
+## Features
+
+## Features
+
+### Storage Layer ✅
+
 - ✅ **Crash-safe storage** with automatic recovery
 - ✅ **Memory-mapped I/O** for high performance
-- ✅ **Structured error handling** with recovery guidance
-- ✅ **Comprehensive testing** including corruption scenarios
-- 🚧 **Index layer** for fast offset lookups (in progress)
-- 🚧 **gRPC networking** (planned)
-- 🚧 **Raft consensus** (planned)
+- ✅ **Append-only Store** with length-prefixed records
+- ✅ **Index layer** for fast offset-to-position lookups
+- ✅ **Segment management** with automatic rotation
+- ✅ **Log abstraction** managing multiple segments as unified log
+- ✅ **Structured error handling** with comprehensive testing
+
+### Network Layer ✅
+
+- ✅ **gRPC server** with Protocol Buffers API
+- ✅ **Produce/Consume operations** (Kafka-style naming)
+- ✅ **Thread-safe concurrent access**
+- ✅ **Persistence on restart** - loads existing segments automatically
+
+### Planned Features 🚧
+
+- 🚧 **Service Discovery** - Cluster membership
+- 🚧 **Raft Consensus** - Leader election and log replication
+- 🚧 **Security** - TLS, authentication, authorization
+- 🚧 **Observability** - Metrics, distributed tracing
 
 ## Development
 

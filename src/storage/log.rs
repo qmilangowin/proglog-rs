@@ -3,7 +3,7 @@ use crate::errors::LogError;
 use crate::storage::segment::Segment;
 use crate::storage::traits::StorageCleanup;
 use crate::{LogResult, storage::traits::LocalFileSystem};
-use std::fs;
+use std::fs::{self, read_dir};
 use std::path::PathBuf;
 use tracing::{debug, info, instrument, warn};
 
@@ -202,14 +202,57 @@ impl Log {
     fn load_segments(&mut self) -> LogResult<()> {
         debug!("Loading existing segments");
 
-        // TODO: scan the log directory for existing segment files
-        // For now, just create the first segment if none exist
+        let entries = read_dir(&self.config.log_dir).map_err(|e| LogError::DirectoryError {
+            path: self.config.log_dir.to_string_lossy().to_string(),
+            source: e,
+        })?;
 
-        if self.segments.is_empty() {
+        let mut segment_offset = Vec::new();
+
+        // find all .log files and extract their base offsets.
+        for entry in entries {
+            let entry = entry.map_err(|e| LogError::DirectoryError {
+                path: self.config.log_dir.to_string_lossy().to_string(),
+                source: e,
+            })?;
+
+            let path = entry.path();
+            if let Some(extension) = path.extension()
+                && extension == "log"
+                && let Some(file_name) = path.file_stem()
+                && let Ok(base_offset) = file_name.to_string_lossy().parse::<u64>()
+            {
+                segment_offset.push(base_offset);
+            }
+        }
+
+        // Sort offsets to load segments in order
+        segment_offset.sort_unstable();
+
+        if segment_offset.is_empty() {
+            debug!("No existing segments found, creating initial segment");
             let segment = self.create_segment(0)?;
             self.segments.push(segment);
             self.active_segment_index = 0;
             self.next_offset = 0;
+        } else {
+            debug!("Found {} existing segments", segment_offset.len());
+
+            for base_offset in segment_offset {
+                let segment = self.create_segment(base_offset)?;
+                self.segments.push(segment);
+            }
+
+            self.active_segment_index = self.segments.len() - 1;
+
+            let last_segment = &self.segments[self.active_segment_index];
+            self.next_offset = last_segment.next_offset();
+
+            info!(
+                loaded_segments = self.segments.len(),
+                next_offset = self.next_offset,
+                "Loaded existing segments"
+            );
         }
 
         Ok(())

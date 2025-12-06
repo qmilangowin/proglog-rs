@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package log.v1;
+
+// Log service for append-only distributed commit log
+service Log {
+  // Append a record to the log
+  rpc Produce(ProduceRequest) returns (ProduceResponse);
+
+  // Read a record from the log
+  rpc Consume(ConsumeRequest) returns (ConsumeResponse);
+}
+
+message ProduceRequest {
+  bytes record = 1;
+}
+
+message ProduceResponse {
+  uint64 offset = 1;
+}
+
+message ConsumeRequest {
+  uint64 offset = 1;
+}
+
+message ConsumeResponse {
+  bytes record = 1;
+  uint64 offset = 2;
+}
