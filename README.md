@@ -1,5 +1,7 @@
 # proglog-rs
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/qmilangowin/proglog-rs)
+
 A distributed commit log implementation in Rust, inspired by "Distributed Services with Go" by Travis Jeffery.
 
 NB: Still WIP when I have time. Not yet complete.
