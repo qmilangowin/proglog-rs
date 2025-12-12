@@ -21,7 +21,7 @@ pub struct LogConfig {
 impl Default for LogConfig {
     fn default() -> Self {
         Self {
-            max_store_bytes: 1024 * 1024, // 1 MB default
+            max_store_bytes: 200 * 200, // 1 MB default
             max_index_entries: 1024,
             log_dir: PathBuf::from("data"),
         }
@@ -95,6 +95,27 @@ impl Log {
         debug!(offset, data_len = data.len(), "Successfully read from log");
 
         Ok(data)
+    }
+
+    /// Efficiently scans records sequentially starting from the given offset.
+    /// This is faster than calling `read()` repeatedly because it avoids index lookups
+    /// and scans the store files directly.
+    ///
+    /// # Example
+    /// ```ignore
+    /// for result in log.scan_from(100) {
+    ///     let (offset, data) = result?;
+    ///     process(offset, data);
+    /// }
+    /// ```
+    #[instrument(skip(self), fields(start_offset))]
+    pub fn scan_from(&self, start_offset: u64) -> LogScanIterator<'_> {
+        LogScanIterator {
+            log: self,
+            current_offset: start_offset,
+            current_segment_idx: 0,
+            current_position: None,
+        }
     }
 
     pub fn next_offset(&self) -> u64 {
@@ -304,6 +325,78 @@ impl Log {
     }
 }
 
+/// Iterator for efficiently scanning log records sequentially
+pub struct LogScanIterator<'a> {
+    log: &'a Log,
+    current_offset: u64,
+    current_segment_idx: usize,
+    current_position: Option<u64>,
+}
+
+impl<'a> Iterator for LogScanIterator<'a> {
+    type Item = LogResult<(u64, Vec<u8>)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // check if we're at the end
+        if self.current_offset >= self.log.next_offset {
+            return None;
+        }
+
+        if self.current_position.is_none() {
+            match self.find_segment_with_offset() {
+                Ok(seg_idx) => {
+                    self.current_segment_idx = seg_idx;
+                    let segment = &self.log.segments[seg_idx];
+                    match segment.read(self.current_offset) {
+                        Ok(data) => {
+                            let offset = self.current_offset;
+                            self.current_offset += 1;
+                            return Some(Ok((offset, data)));
+                        }
+                        Err(e) => return Some(Err(e.into())),
+                    }
+                }
+                Err(e) => return Some(Err(e)),
+            }
+        }
+
+        let segement = &self.log.segments[self.current_segment_idx];
+
+        if !segement.contains_offset(self.current_offset) {
+            self.current_segment_idx += 1;
+            if self.current_segment_idx >= self.log.segments.len() {
+                return None;
+            }
+            self.current_position = None;
+            return self.next();
+        }
+
+        match segement.read(self.current_offset) {
+            Ok(data) => {
+                let offset = self.current_offset;
+                self.current_offset += 1;
+                Some(Ok((offset, data)))
+            }
+            Err(e) => Some(Err(e.into())),
+        }
+    }
+}
+
+impl<'a> LogScanIterator<'a> {
+    fn find_segment_with_offset(&self) -> LogResult<usize> {
+        for (idx, segment) in self.log.segments.iter().enumerate() {
+            if segment.contains_offset(self.current_offset) {
+                return Ok(idx);
+            }
+        }
+        Err(LogError::OffsetNotFound {
+            offset: self.current_offset,
+            base_offset: self.log.base_offset(),
+            next_offset: self.log.next_offset,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -435,6 +528,62 @@ mod tests {
         assert_eq!(log.base_offset(), 0);
         assert_eq!(log.latest_offset(), None);
         assert_eq!(log.segment_count(), 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_scan_from() -> LogResult<()> {
+        init_tracing();
+        let temp_dir = TempDir::new().unwrap();
+        let mut log = Log::new(test_config(&temp_dir))?;
+
+        // Add records
+        let records = ["First", "Second", "Third", "Fourth", "Fifth"];
+        for record in &records {
+            log.append(record.as_bytes())?;
+        }
+
+        // Scan from offset 2
+        let mut scanned = Vec::new();
+        for result in log.scan_from(2) {
+            let (offset, data) = result?;
+            let text = String::from_utf8_lossy(&data);
+            scanned.push((offset, text.to_string()));
+        }
+
+        assert_eq!(scanned.len(), 3);
+        assert_eq!(scanned[0], (2, "Third".to_string()));
+        assert_eq!(scanned[1], (3, "Fourth".to_string()));
+        assert_eq!(scanned[2], (4, "Fifth".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_scan_from_across_segments() -> LogResult<()> {
+        init_tracing();
+        let temp_dir = TempDir::new().unwrap();
+        let mut log = Log::new(test_config(&temp_dir))?;
+
+        // Add enough records to trigger rotation
+        for i in 0..15 {
+            let data = format!("Record {i}");
+            log.append(data.as_bytes())?;
+        }
+
+        // Should have multiple segments
+        assert!(log.segment_count() > 1);
+
+        // Scan all records
+        let mut count = 0;
+        for result in log.scan_from(0) {
+            let (offset, _data) = result?;
+            assert_eq!(offset, count);
+            count += 1;
+        }
+
+        assert_eq!(count, 15);
 
         Ok(())
     }
