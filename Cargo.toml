@@ -12,7 +12,7 @@ prost-types = "0.14"
 tonic-prost = "0.14"
 
 anyhow = "1.0.100"
-bincode = "2.0.1"
+bincode = "3.0.0"
 memmap2 = "0.9.9"
 serde = { version = "1.0.228", features = ["derive"] }
 tempfile = "3.23.0"
